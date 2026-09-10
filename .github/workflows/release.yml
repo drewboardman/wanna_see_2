@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version tag to publish, e.g. v1.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: luajit-2.1
+      - uses: leafo/gh-actions-luarocks@v6
+      - name: Install test dependencies
+        run: luarocks --lua-version=5.1 --tree=lua_modules test --prepare
+      - name: Run tests
+        run: ./lua_modules/bin/busted
+      - name: Build release package
+        id: package
+        run: |
+          version="${{ inputs.version || github.ref_name }}"
+          tools/package.sh "$version" >/dev/null
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=release/i_wanna_see-$version.zip" >> "$GITHUB_OUTPUT"
+      - name: Upload release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: i_wanna_see-${{ steps.package.outputs.version }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.package.outputs.version }}"
+          archive="${{ steps.package.outputs.archive }}"
+          if gh release view "$version" >/dev/null 2>&1; then
+            gh release upload "$version" "$archive" --clobber
+          else
+            gh release create "$version" "$archive" \
+              --title "i_wanna_see $version" \
+              --notes "Extract the attached zip into your Darktide \`mods\` folder. It unpacks as \`mods/i_wanna_see/\`, the layout Darktide Mod Framework expects. Add \`i_wanna_see\` to \`mod_load_order.txt\` if it is not listed already, then restart the game." \
+              --generate-notes
+          fi
