@@ -180,6 +180,34 @@ describe("i_wanna_see", function()
 			assert.is_truthy(f.last_echo():find("life", 1, true), f.last_echo())
 		end)
 
+		it("echoes a partial intensity once even while the values drift", function()
+			f.set_settings(merged({ purgatus_intensity = 50, debug_intensity = true }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._stream_effect_id = {}
+			flamer._action_module_position_finder_component.position_valid = true
+			flamer._action_module_position_finder_component.position = f.vector(1, 0, 0)
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			local echoes = f.count("mod.echo")
+
+			assert.is_true(echoes > 0, "reported something")
+
+			-- Aiming further away moves every per-frame value, which must not produce
+			-- another message or the chat floods.
+			flamer._action_module_position_finder_component.position = f.vector(2, 0, 0)
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(echoes, f.count("mod.echo"), "no repeat for a drifted distance")
+		end)
+
 		it("stays quiet when debugging is off", function()
 			f.set_settings(merged({ purgatus_intensity = 50 }))
 			f.set_action_settings({

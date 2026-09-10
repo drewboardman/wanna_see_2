@@ -96,16 +96,24 @@ mod.on_setting_changed = function(setting_id)
 end
 
 -- Diagnostic aid for the partial intensities. DMF echoes to the log and the chat,
--- and each distinct message is only echoed once, so one test run leaves a readable
--- trail instead of a flood. Turned on with the debug_intensity option.
+-- so the output has to be strictly bounded: a message is echoed once per key, and
+-- the total is capped. A per-frame value (distance, for instance) must never end up
+-- in the key, or every frame would echo and flood the chat.
 local debug_reported = {}
+local debug_reports_sent = 0
+local MAX_DEBUG_REPORTS = 60
 
-local function report(message)
-	if not DEBUG_INTENSITY or debug_reported[message] then
+local function report(message, key)
+	if not DEBUG_INTENSITY then
 		return
 	end
 
-	debug_reported[message] = true
+	if debug_reported[key or message] or debug_reports_sent >= MAX_DEBUG_REPORTS then
+		return
+	end
+
+	debug_reported[key or message] = true
+	debug_reports_sent = debug_reports_sent + 1
 
 	-- Passed as an argument so a percent sign inside the message is harmless.
 	mod:echo("[i_wanna_see] %s", message)
@@ -591,7 +599,12 @@ local function scale_stream_life(self, action_settings, intensity)
 	local life = distance / speed * intensity / 100
 
 	if DEBUG_INTENSITY then
-		report(string.format("flamer: %d%% -> life %.3f (speed %s, distance %.2f)", intensity, life, tostring(speed), distance))
+		-- Keyed by the things that stay put, so a drifting distance cannot make this
+		-- echo again: one report per effect, per intensity, per variable index.
+		report(
+			string.format("flamer: %s at %d%% -> life %.3f (speed %s, distance %.2f, variable %s)", effect_name, intensity, life, tostring(speed), distance, tostring(variable_index)),
+			string.format("flamer life %s|%d|%s", effect_name, intensity, tostring(variable_index))
+		)
 	end
 
 	World.set_particles_variable(self._world, stream_effect_id, variable_index, Vector3(life, life, life))

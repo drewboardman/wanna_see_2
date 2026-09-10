@@ -357,6 +357,9 @@ local function fixture()
 		last_echo = function()
 			return last_echo
 		end,
+		vector = function(x, y, z)
+			return vec(x, y, z)
+		end,
 		set_settings = set_settings,
 		set_setting = set_setting,
 		set_action_settings = set_action_settings,
