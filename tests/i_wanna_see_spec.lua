@@ -180,6 +180,32 @@ describe("i_wanna_see", function()
 			assert.is_truthy(f.last_echo():find("life", 1, true), f.last_echo())
 		end)
 
+		it("honours the weapon's own actions when the current action does not fire", function()
+			f.set_settings(merged({ purgatus_intensity = 0 }))
+			f.set_action_settings(nil)
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._weapon_actions = { action_one_hold = { fire_configuration = { damage_type = "warpfire" } } }
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(0, f.count("FlamerGasEffects._update_effects"), "vanilla skipped via the weapon fallback")
+		end)
+
+		it("leaves a weapon with no fire configuration at all alone", function()
+			f.set_settings(merged({ purgatus_intensity = 0, flamer_intensity = 0 }))
+			f.set_action_settings(nil)
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._weapon_actions = { action_one_click = { kind = "melee" } }
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(1, f.count("FlamerGasEffects._update_effects"), "vanilla runs")
+		end)
+
 		it("echoes a partial intensity once even while the values drift", function()
 			f.set_settings(merged({ purgatus_intensity = 50, debug_intensity = true }))
 			f.set_action_settings({

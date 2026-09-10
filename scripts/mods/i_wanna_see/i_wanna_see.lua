@@ -120,8 +120,30 @@ local function report(message, key)
 end
 
 -- Particle variables worth looking for, so the report can say which knobs an effect
--- actually exposes rather than only the one vanilla tries to set.
-local PROBE_VARIABLES = { "life", "size", "spawn_rate", "emission_rate", "amount", "velocity", "scale", "life_random" }
+-- actually exposes rather than only the one vanilla tries to set. The names are the
+-- ones the game itself uses elsewhere: "life" for the flamers, "size" and "radius"
+-- for areas, "length" for beams, "intensity" for looping player particles, "velocity"
+-- for the AI flamers, and "1".."4" for the control points a code driven jet is built
+-- from.
+local PROBE_VARIABLES = {
+	"life",
+	"life_random",
+	"size",
+	"scale",
+	"intensity",
+	"length",
+	"radius",
+	"hit_distance",
+	"velocity",
+	"speed",
+	"spawn_rate",
+	"emission_rate",
+	"amount",
+	"1",
+	"2",
+	"3",
+	"4",
+}
 
 local function probe_variables(world, effect_name)
 	local found = {}
@@ -499,6 +521,70 @@ local function fire_configuration_intensity(action_settings)
 	return intensity
 end
 
+-- The active action is not always one that fires (wielding, aiming, reloading), so the
+-- weapon's own actions are consulted as a fallback. That is what lets an instance which
+-- draws a flame honour the setting even when its current action carries no fire
+-- configuration of its own. Resolved once per instance.
+local function instance_fire_damage_types(self)
+	local damage_types = self._iws_fire_damage_types
+
+	if damage_types then
+		return damage_types
+	end
+
+	damage_types = {}
+
+	local actions = self._weapon_actions
+
+	if actions then
+		for _, settings in pairs(actions) do
+			local configuration = settings and settings.fire_configuration
+			local damage_type = configuration and configuration.damage_type
+
+			if damage_type then
+				damage_types[damage_type] = true
+			end
+
+			local configurations = settings and settings.fire_configurations
+
+			if configurations then
+				for i = 1, #configurations do
+					local entry = configurations[i]
+					local entry_damage_type = entry and entry.damage_type
+
+					if entry_damage_type then
+						damage_types[entry_damage_type] = true
+					end
+				end
+			end
+		end
+	end
+
+	self._iws_fire_damage_types = damage_types
+
+	return damage_types
+end
+
+local function instance_intensity(self, action_settings)
+	local intensity = fire_configuration_intensity(action_settings)
+
+	if intensity < 100 then
+		return intensity
+	end
+
+	local lowest = 100
+
+	for damage_type in pairs(instance_fire_damage_types(self)) do
+		local candidate = damage_type_intensity(damage_type)
+
+		if candidate < lowest then
+			lowest = candidate
+		end
+	end
+
+	return lowest
+end
+
 -- Vanilla's scorch decals are queued round robin through self._impact_data, so the
 -- slot that moved since the last frame is the one it just queued. Counting queued
 -- impacts and clearing a share of them thins the decals out by an exact ratio rather
@@ -621,10 +707,10 @@ mod:hook(CLASS.FlamerGasEffects, "_update_effects", function(func, self, dt, t)
 	end
 
 	local action_settings = Action.current_action_settings_from_component(self._weapon_action_component, self._weapon_actions)
-	local intensity = fire_configuration_intensity(action_settings)
+	local intensity = instance_intensity(self, action_settings)
 
 	if DEBUG_INTENSITY then
-		report(string.format("flamer: fire configuration damage type %s -> %d%%", tostring(action_settings and action_settings.fire_configuration and action_settings.fire_configuration.damage_type), intensity))
+		report(string.format("flamer: instance (husk %s, local %s), active action damage type %s -> %d%%", tostring(self._is_husk), tostring(self._is_local_unit), tostring(action_settings and action_settings.fire_configuration and action_settings.fire_configuration.damage_type), intensity))
 	end
 
 	if intensity >= 100 then
