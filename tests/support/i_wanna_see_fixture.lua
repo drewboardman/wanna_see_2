@@ -4,6 +4,8 @@
 -- so a hook that stops matching the game's behaviour fails here first.
 
 local MOD_PATH = "scripts/mods/i_wanna_see/i_wanna_see.lua"
+local DATA_PATH = "scripts/mods/i_wanna_see/i_wanna_see_data.lua"
+local LOCALIZATION_PATH = "scripts/mods/i_wanna_see/i_wanna_see_localization.lua"
 
 local function fixture()
 	local calls = {}
@@ -269,6 +271,11 @@ local function fixture()
 		get = function(_, setting_id)
 			return settings[setting_id]
 		end,
+		-- DMF formats localized strings, which is what the mod's % escaping has to
+		-- survive, so this stands in for it closely enough to catch a bad string.
+		localize = function(_, text_id)
+			return text_id
+		end,
 		hook = function(_, obj, method, callback)
 			local target = type(obj) == "string" and env.CLASS[obj] or obj
 			local original = target[method]
@@ -289,6 +296,13 @@ local function fixture()
 
 	setfenv(chunk, env)
 	chunk()
+
+	local data_chunk = assert(loadfile(DATA_PATH))
+
+	setfenv(data_chunk, env)
+
+	local mod_data = data_chunk()
+	local localization = assert(loadfile(LOCALIZATION_PATH))()
 
 	local function set_settings(overrides)
 		settings = {
@@ -324,6 +338,8 @@ local function fixture()
 		unit = unit,
 		settings = settings,
 		hooks = registered,
+		mod_data = mod_data,
+		localization = localization,
 		count = count,
 		reset = reset,
 		decal_color = function()

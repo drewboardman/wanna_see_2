@@ -39,6 +39,32 @@ describe("i_wanna_see", function()
 		assert.is_not_nil(f.hooks._create_effects, "FlamerPilotLightEffects._create_effects")
 	end)
 
+	describe("localization and options", function()
+		it("survives string.format, so no percent sign is left unescaped", function()
+			for text_id, translations in pairs(f.localization) do
+				for language, text in pairs(translations) do
+					local formatted, message = pcall(string.format, text)
+
+					assert.is_true(formatted, text_id .. " (" .. language .. "): " .. tostring(message))
+				end
+			end
+		end)
+
+		it("has a localization entry for every widget the data file declares", function()
+			local function check_widget(widget)
+				assert.is_not_nil(f.localization[widget.setting_id], "widget " .. tostring(widget.setting_id))
+
+				for _, child in ipairs(widget.sub_widgets or {}) do
+					check_widget(child)
+				end
+			end
+
+			for _, widget in ipairs(f.mod_data.options.widgets) do
+				check_widget(widget)
+			end
+		end)
+	end)
+
 	describe("flamer", function()
 		it("runs vanilla and never reads a setting at full intensity", function()
 			f.set_settings(merged())
