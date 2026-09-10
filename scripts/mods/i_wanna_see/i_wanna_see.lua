@@ -351,18 +351,30 @@ end
 -- Vanilla's add callbacks mark hit_units so the chain does not try to re-add the
 -- same target every frame; keep exactly that bookkeeping and skip only the spawn.
 local function suppress_spawn(node, context)
-	context.hit_units[node:value("unit")] = true
+	local hit_units = context and context.hit_units
+	local unit = node:value("unit")
+
+	if hit_units and unit then
+		hit_units[unit] = true
+	end
 end
 
--- Every link, including the ones created by ChainLightning.jump, is added through
--- ChainLightningTarget.add_child, so substituting the callback here thins or removes
--- the beams while leaving the node tree, vanilla's own cleanup and its hit_units
--- tracking alone.
-mod:hook(ChainLightningTarget, "add_child", function(func, self, on_add_func, func_context, ...)
+-- Whether this tree is the visual link effects, which is the only chain lightning tree
+-- the mod may thin out. Chain lightning trees are also built by the electrokinetic
+-- staff's weapon action and by the arc ability templates, and their callbacks apply
+-- buffs to every target they touch: substituting those breaks the ability. Their
+-- contexts carry action_settings or buff_extension and no FX data table pool, so the
+-- pool is what tells the two apart.
+local function is_link_effects_context(func_context)
+	return type(func_context) == "table" and type(func_context.fx_data_tables) == "table" and type(func_context.hit_units) == "table"
+end
+
+-- Returns the callback to spawn with, or nil to leave vanilla's in place.
+local function chain_spawn_substitute(func_context)
 	local intensity = chain_intensity(func_context)
 
 	if intensity >= 100 then
-		return func(self, on_add_func, func_context, ...)
+		return nil
 	end
 
 	if intensity > 0 then
@@ -373,18 +385,44 @@ mod:hook(ChainLightningTarget, "add_child", function(func, self, on_add_func, fu
 		local keep_every = math.max(1, math.floor(100 / intensity + 0.5))
 
 		if count % keep_every == 0 then
-			return func(self, on_add_func, func_context, ...)
+			return nil
 		end
 	end
 
-	return func(self, suppress_spawn, func_context, ...)
+	return suppress_spawn
+end
+
+-- Every link, including the ones created by ChainLightning.jump, is added through
+-- ChainLightningTarget.add_child, so substituting the callback here thins or removes
+-- the beams while leaving the node tree, vanilla's own cleanup and its hit_units
+-- tracking alone. This hook is deliberately fail open: any context that is not
+-- recognisably the link effects, and any error while deciding, leaves vanilla's own
+-- callback untouched rather than taking the tree it belongs to down with it.
+mod:hook(ChainLightningTarget, "add_child", function(func, self, on_add_func, func_context, ...)
+	if (SMITE_INTENSITY < 100 or ELECTRO_INTENSITY < 100) and is_link_effects_context(func_context) then
+		local ok, substitute = pcall(chain_spawn_substitute, func_context)
+
+		if ok and substitute then
+			return func(self, substitute, func_context, ...)
+		end
+	end
+
+	return func(self, on_add_func, func_context, ...)
 end)
 
 -- The arc drawn when the chain has no target is spawned outside add_child. It is a
 -- single small effect, so it only goes away with the chain itself.
 mod:hook(CLASS.ChainLightningLinkEffects, "_find_no_target", function(func, self, t)
-	if chain_intensity(self._func_context) <= 0 then
-		return
+	if SMITE_INTENSITY < 100 or ELECTRO_INTENSITY < 100 then
+		local context = self._func_context
+
+		if is_link_effects_context(context) then
+			local ok, intensity = pcall(chain_intensity, context)
+
+			if ok and intensity <= 0 then
+				return
+			end
+		end
 	end
 
 	return func(self, t)

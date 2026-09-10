@@ -316,6 +316,39 @@ describe("i_wanna_see", function()
 	end)
 
 	describe("chain lightning", function()
+		it("leaves the electrokinetic staff's weapon action tree alone", function()
+			f.set_settings(merged({ smite_intensity = 0, electro_intensity = 0 }))
+			f.set_action_settings({ chain_settings = { staff = true } })
+			f.reset()
+
+			f.chain_add_child({}, f.vanilla_callback(), f.new_action_context())
+
+			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "the action's own callback applies the buff")
+		end)
+
+		it("leaves an arc ability template's tree alone", function()
+			f.set_settings(merged({ smite_intensity = 0, electro_intensity = 0 }))
+			f.reset()
+
+			f.chain_add_child({}, f.vanilla_callback(), f.new_arc_context())
+
+			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "the template's own callback is used")
+		end)
+
+		it("fails open when deciding errors", function()
+			f.set_settings(merged({ smite_intensity = 0 }))
+			f.set_action_settings(setmetatable({}, {
+				__index = function()
+					error("boom")
+				end,
+			}))
+			f.reset()
+
+			f.chain_add_child({}, f.vanilla_callback(), f.new_chain_context())
+
+			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "vanilla is used rather than propagating the error")
+		end)
+
 		it("suppresses Smite beams but keeps the node tree and hit_units bookkeeping", function()
 			f.set_settings(merged({ smite_intensity = 0 }))
 			f.set_action_settings({ chain_settings = { staff = false } })

@@ -437,6 +437,26 @@ local function fixture()
 			}
 		end,
 
+		-- The electrokinetic staff's weapon action sets hit_units on its context but has
+		-- no FX data table pool, and its add callback applies the chain buff to targets.
+		new_action_context = function()
+			return {
+				hit_units = {},
+				action_settings = {},
+				talent_extension = {},
+			}
+		end,
+
+		-- An arc ability template's context looks like this.
+		new_arc_context = function()
+			return {
+				buff_extension = {},
+				hit_units = {},
+				player_unit = {},
+				is_server = true,
+			}
+		end,
+
 		new_shield_self = function(shield_unit)
 			return {
 				_wwise_world = {},
