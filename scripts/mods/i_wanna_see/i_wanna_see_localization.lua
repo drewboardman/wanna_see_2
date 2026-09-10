@@ -53,6 +53,12 @@ return {
 	shield_group = {
 		en = "Psyker Shield Settings",
 	},
+	debug_intensity = {
+		en = "Debug: report intensity scaling in chat",
+	},
+	debug_intensity_description = {
+		en = "Echoes, once each, what the partial intensities resolve to and which particle variables the effects expose. Used to work out why a value between 0 and 100 does nothing.",
+	},
 }
 
 

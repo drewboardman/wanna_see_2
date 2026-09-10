@@ -24,6 +24,7 @@ local ENEMY_FLAME_INTENSITY = 100
 local REMOVE_SHIELD_EFFECT = false
 local REMOVE_SHIELD_SOUND = false
 local DISPLAY_SHIELD_RADIUS = false
+local DEBUG_INTENSITY = false
 local DECAL_R = 0
 local DECAL_G = 0
 local DECAL_B = 4
@@ -69,6 +70,9 @@ local function refresh_settings(setting_id)
 	if not setting_id or setting_id == "display_shield_radius" then
 		DISPLAY_SHIELD_RADIUS = mod:get("display_shield_radius") == true
 	end
+	if not setting_id or setting_id == "debug_intensity" then
+		DEBUG_INTENSITY = mod:get("debug_intensity") == true
+	end
 	if not setting_id or setting_id == "shield_radius_color" then
 		local color = mod:get("shield_radius_color")
 
@@ -89,6 +93,40 @@ end
 
 mod.on_setting_changed = function(setting_id)
 	refresh_settings(setting_id)
+end
+
+-- Diagnostic aid for the partial intensities. DMF echoes to the log and the chat,
+-- and each distinct message is only echoed once, so one test run leaves a readable
+-- trail instead of a flood. Turned on with the debug_intensity option.
+local debug_reported = {}
+
+local function report(message)
+	if not DEBUG_INTENSITY or debug_reported[message] then
+		return
+	end
+
+	debug_reported[message] = true
+
+	-- Passed as an argument so a percent sign inside the message is harmless.
+	mod:echo("[i_wanna_see] %s", message)
+end
+
+-- Particle variables worth looking for, so the report can say which knobs an effect
+-- actually exposes rather than only the one vanilla tries to set.
+local PROBE_VARIABLES = { "life", "size", "spawn_rate", "emission_rate", "amount", "velocity", "scale", "life_random" }
+
+local function probe_variables(world, effect_name)
+	local found = {}
+
+	for i = 1, #PROBE_VARIABLES do
+		local name = PROBE_VARIABLES[i]
+
+		if World.find_particles_variable(world, effect_name, name) then
+			found[#found + 1] = name
+		end
+	end
+
+	return #found > 0 and table.concat(found, ", ") or "none of the probed names"
 end
 
 -- Shield radius decals are tracked per shield unit and destroyed with it. A plain
@@ -265,9 +303,19 @@ local function chain_intensity(func_context)
 		is_staff = chain_settings and chain_settings.staff and true or false
 
 		chain_source_is_staff[func_context] = is_staff
+
+		if DEBUG_INTENSITY then
+			report(string.format("chain lightning: source classified as %s", is_staff and "the electrokinetic staff" or "smite"))
+		end
 	end
 
-	return is_staff and ELECTRO_INTENSITY or SMITE_INTENSITY
+	local intensity = is_staff and ELECTRO_INTENSITY or SMITE_INTENSITY
+
+	if DEBUG_INTENSITY then
+		report(string.format("chain lightning: %s intensity -> %d%%", is_staff and "staff" or "smite", intensity))
+	end
+
+	return intensity
 end
 
 -- Vanilla's add callbacks mark hit_units so the chain does not try to re-add the
@@ -489,6 +537,8 @@ local function scale_stream_life(self, action_settings, intensity)
 	local stream_effect_id = self._stream_effect_id
 
 	if not stream_effect_id then
+		report("flamer: scaling skipped, no stream yet")
+
 		return
 	end
 
@@ -498,6 +548,10 @@ local function scale_stream_life(self, action_settings, intensity)
 	local position_finder = self._action_module_position_finder_component
 
 	if not speed or speed == 0 or not position_finder then
+		if DEBUG_INTENSITY then
+			report(string.format("flamer: scaling skipped, speed %s, position finder %s", tostring(speed), position_finder and "present" or "missing"))
+		end
+
 		return
 	end
 
@@ -514,6 +568,8 @@ local function scale_stream_life(self, action_settings, intensity)
 	local effect_name = self._fx_extension:should_play_husk_effect() and stream_effect_data.name_3p or stream_effect_data.name
 
 	if not effect_name then
+		report("flamer: scaling skipped, no effect name")
+
 		return
 	end
 
@@ -522,6 +578,10 @@ local function scale_stream_life(self, action_settings, intensity)
 	if variable_index == nil then
 		variable_index = World.find_particles_variable(self._world, effect_name, "life")
 		stream_life_variables[effect_name] = variable_index
+
+		if DEBUG_INTENSITY then
+			report(string.format("flamer: %s exposes %s (life lookup returned %s)", effect_name, probe_variables(self._world, effect_name), tostring(variable_index)))
+		end
 	end
 
 	if not variable_index then
@@ -529,6 +589,10 @@ local function scale_stream_life(self, action_settings, intensity)
 	end
 
 	local life = distance / speed * intensity / 100
+
+	if DEBUG_INTENSITY then
+		report(string.format("flamer: %d%% -> life %.3f (speed %s, distance %.2f)", intensity, life, tostring(speed), distance))
+	end
 
 	World.set_particles_variable(self._world, stream_effect_id, variable_index, Vector3(life, life, life))
 end
@@ -545,6 +609,10 @@ mod:hook(CLASS.FlamerGasEffects, "_update_effects", function(func, self, dt, t)
 
 	local action_settings = Action.current_action_settings_from_component(self._weapon_action_component, self._weapon_actions)
 	local intensity = fire_configuration_intensity(action_settings)
+
+	if DEBUG_INTENSITY then
+		report(string.format("flamer: fire configuration damage type %s -> %d%%", tostring(action_settings and action_settings.fire_configuration and action_settings.fire_configuration.damage_type), intensity))
+	end
 
 	if intensity >= 100 then
 		self._iws_impacts_cleared = false

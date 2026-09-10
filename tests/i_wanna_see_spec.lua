@@ -163,6 +163,39 @@ describe("i_wanna_see", function()
 			assert.are.equal(6, flamer._impact_data[2].time, "second queued decal kept")
 		end)
 
+		it("reports what the scaling resolved to when debugging is on", function()
+			f.set_settings(merged({ purgatus_intensity = 50, debug_intensity = true }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._stream_effect_id = {}
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.is_truthy(f.last_echo())
+			assert.is_truthy(f.last_echo():find("life", 1, true), f.last_echo())
+		end)
+
+		it("stays quiet when debugging is off", function()
+			f.set_settings(merged({ purgatus_intensity = 50 }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._stream_effect_id = {}
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(0, f.count("mod.echo"), "no chat messages")
+		end)
+
 		it("caches the particle variable lookup per effect name", function()
 			f.set_settings(merged({ purgatus_intensity = 50 }))
 			f.set_action_settings({

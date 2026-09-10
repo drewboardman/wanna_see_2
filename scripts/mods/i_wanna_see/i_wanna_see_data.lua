@@ -68,6 +68,11 @@ return {
 					},
 				},
 			},
+			{
+				setting_id = "debug_intensity",
+				type = "checkbox",
+				default_value = false,
+			},
 		},
 	},
 }

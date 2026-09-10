@@ -26,6 +26,11 @@ The enemy flamer option is the exception: it defaults to 100%, because that flam
 also a warning, and it drops a share of *enemies* rather than a share of frames. Each
 enemy is decided once, so a flame that goes away stays away.
 
+`Debug: report intensity scaling in chat` echoes what a partial intensity resolves to
+for the weapon you are holding, and which particle variables the effect exposes. Each
+distinct message is echoed once, so a short test run leaves a readable trail in the
+chat instead of a flood. It is off by default and costs nothing when off.
+
 Options are read once at load and refreshed when they change, so they can be toggled
 in the mod options menu without a restart.
 

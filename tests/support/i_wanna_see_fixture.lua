@@ -51,6 +51,7 @@ local function fixture()
 	local unit = { name = "unit" }
 	local last_decal_color = nil
 	local last_stream_life = nil
+	local last_echo = nil
 	local local_player_unit = { name = "local_player_unit" }
 	local random_value = 0.5
 	local env = setmetatable({}, { __index = _G })
@@ -276,6 +277,11 @@ local function fixture()
 		localize = function(_, text_id)
 			return text_id
 		end,
+		echo = function(_, format_string, message)
+			record("mod.echo")
+
+			last_echo = message or format_string
+		end,
 		hook = function(_, obj, method, callback)
 			local target = type(obj) == "string" and env.CLASS[obj] or obj
 			local original = target[method]
@@ -347,6 +353,9 @@ local function fixture()
 		end,
 		stream_life = function()
 			return last_stream_life
+		end,
+		last_echo = function()
+			return last_echo
 		end,
 		set_settings = set_settings,
 		set_setting = set_setting,
