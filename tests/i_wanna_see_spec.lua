@@ -250,6 +250,46 @@ describe("i_wanna_see", function()
 			assert.are.equal(0, f.count("mod.echo"), "no chat messages")
 		end)
 
+		it("hands the frame back to vanilla when the decision throws", function()
+			f.set_settings(merged({ purgatus_intensity = 50 }))
+			f.set_action_settings(setmetatable({}, {
+				__index = function()
+					error("boom")
+				end,
+			}))
+			f.reset()
+
+			assert.has_no.errors(function()
+				f.flamer_update(f.new_flamer_self(), 0.1, 1)
+			end)
+
+			assert.are.equal(1, f.count("FlamerGasEffects._update_effects"), "vanilla ran")
+			assert.are.equal("the flame intensity", f.last_error())
+		end)
+
+		it("keeps a scaling failure out of the game's update", function()
+			f.set_settings(merged({ purgatus_intensity = 50 }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._stream_effect_id = {}
+			flamer._action_flamer_gas_component = setmetatable({}, {
+				__index = function()
+					error("boom")
+				end,
+			})
+
+			assert.has_no.errors(function()
+				f.flamer_update(flamer, 0.1, 1)
+			end)
+
+			assert.are.equal(1, f.count("FlamerGasEffects._update_effects"), "vanilla ran regardless")
+		end)
+
 		it("caches the particle variable lookup per effect name", function()
 			f.set_settings(merged({ purgatus_intensity = 50 }))
 			f.set_action_settings({
@@ -577,6 +617,25 @@ describe("i_wanna_see", function()
 			f.shield_death(shield)
 
 			assert.are.equal(1, f.count("World.destroy_unit"), "decal destroyed anyway")
+		end)
+
+		it("keeps a failure in the shield death effects from reaching the game", function()
+			f.set_settings(merged({ remove_shield_sound = true }))
+			f.reset()
+			local shield = f.new_shield_self()
+
+			shield._position = {
+				unbox = function()
+					error("boom")
+				end,
+			}
+
+			assert.has_no.errors(function()
+				f.shield_death(shield)
+			end)
+
+			assert.are.equal(0, f.count("World.create_particles"), "the fade particle was not attempted")
+			assert.are.equal("the shield death effects", f.last_error())
 		end)
 
 		it("clears decal bookkeeping when the game state changes", function()

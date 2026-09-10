@@ -119,6 +119,21 @@ local function report(message, key)
 	mod:echo("[i_wanna_see] %s", message)
 end
 
+-- Last resort for hooks that touch a live game object: if something unexpected throws,
+-- say so once and leave vanilla's own behaviour standing. A failure has to degrade to
+-- the unmodded game, never take the game down with it.
+local fallback_reported = {}
+
+local function fell_back(what)
+	if fallback_reported[what] then
+		return
+	end
+
+	fallback_reported[what] = true
+
+	mod:error("[i_wanna_see] %s failed, leaving vanilla in charge", what)
+end
+
 -- Particle variables worth looking for, so the report can say which knobs an effect
 -- actually exposes rather than only the one vanilla tries to set. The names are the
 -- ones the game itself uses elsewhere: "life" for the flamers, "size" and "radius"
@@ -165,10 +180,12 @@ end
 local bubble_decals = {}
 
 local function destroy_aoe_decal(unit)
-	local bubble_decal = bubble_decals[unit]
+	local entry = bubble_decals[unit]
 
-	if bubble_decal then
-		World.destroy_unit(Unit.world(unit), bubble_decal)
+	if entry then
+		-- The world travels with the entry, so destroying a decal never has to ask a
+		-- unit that may already be gone for its world.
+		World.destroy_unit(entry.world, entry.decal)
 
 		bubble_decals[unit] = nil
 	end
@@ -211,17 +228,14 @@ local function shield_spawned(unit, dont_load_package)
 
 	destroy_aoe_decal(unit)
 
-	bubble_decals[unit] = get_decal_unit(unit, DECAL_R, DECAL_G, DECAL_B)
+	local world = Unit.world(unit)
+	local decal_unit = get_decal_unit(unit, DECAL_R, DECAL_G, DECAL_B)
+
+	bubble_decals[unit] = { world = world, decal = decal_unit }
 end
 
--- The shield extension is allowed to initialise exactly as vanilla does and its
--- unwanted parts are removed afterwards. Reimplementing init instead meant the copy
--- silently drifted from the game (shield point width, deployable shield durations,
--- sphere particles and sounds, the stop flow event) and every option being off still
--- left a reimplementation of vanilla running.
-mod:hook(CLASS.PsykerForceFieldUnitExtension, "init", function(func, self, extension_init_context, unit, extension_init_data, game_object_data_or_game_session, unit_spawn_parameter_or_game_object_id)
-	func(self, extension_init_context, unit, extension_init_data, game_object_data_or_game_session, unit_spawn_parameter_or_game_object_id)
-
+-- Everything init does after vanilla, kept together so a failure can be contained.
+local function apply_shield_init_options(self)
 	if not (REMOVE_SHIELD_SOUND or REMOVE_SHIELD_EFFECT or DISPLAY_SHIELD_RADIUS) then
 		return
 	end
@@ -260,13 +274,27 @@ mod:hook(CLASS.PsykerForceFieldUnitExtension, "init", function(func, self, exten
 	if DISPLAY_SHIELD_RADIUS and self._sphere_shield then
 		shield_spawned(self._unit)
 	end
+end
+
+-- The shield extension is allowed to initialise exactly as vanilla does and its
+-- unwanted parts are removed afterwards. Reimplementing init instead meant the copy
+-- silently drifted from the game (shield point width, deployable shield durations,
+-- sphere particles and sounds, the stop flow event) and every option being off still
+-- left a reimplementation of vanilla running. Removing the parts is contained so a
+-- failure leaves a working, unmodified shield rather than a broken one.
+mod:hook(CLASS.PsykerForceFieldUnitExtension, "init", function(func, self, extension_init_context, unit, extension_init_data, game_object_data_or_game_session, unit_spawn_parameter_or_game_object_id)
+	func(self, extension_init_context, unit, extension_init_data, game_object_data_or_game_session, unit_spawn_parameter_or_game_object_id)
+
+	if not pcall(apply_shield_init_options, self) then
+		fell_back("the shield init options")
+	end
 end)
 
 -- Vanilla's stop sound cannot be silenced after the fact, and it would be triggered
 -- with a nil source once remove_shield_sound has dropped it, so that one combination
 -- mirrors vanilla without the Wwise calls. Every other combination runs vanilla and
 -- then removes the fade particle it created.
-mod:hook(CLASS.PsykerForceFieldUnitExtension, "_trigger_death_effects", function(func, self)
+local function shield_death_effects(func, self)
 	local unit = self._unit
 
 	if not (REMOVE_SHIELD_SOUND or REMOVE_SHIELD_EFFECT) then
@@ -306,8 +334,17 @@ mod:hook(CLASS.PsykerForceFieldUnitExtension, "_trigger_death_effects", function
 			self._effect_id = nil
 		end
 	end
+end
 
-	destroy_aoe_decal(unit)
+-- Contained for the same reason as init: vanilla's own destroy still cleans up anything
+-- this leaves behind, so a failure here can safely leave the shield dying quietly
+-- rather than taking the game with it.
+mod:hook(CLASS.PsykerForceFieldUnitExtension, "_trigger_death_effects", function(func, self)
+	if not pcall(shield_death_effects, func, self) then
+		fell_back("the shield death effects")
+	end
+
+	pcall(destroy_aoe_decal, self._unit)
 end)
 
 -- Whether a chain lightning source is the electrokinetic staff or Smite is a
@@ -488,13 +525,25 @@ local function enemy_flames_hidden(unit)
 	return hidden
 end
 
+local function enemy_flame_dropped(unit)
+	local ok, hidden = pcall(enemy_flames_hidden, unit)
+
+	if ok then
+		return hidden == true
+	end
+
+	fell_back("the enemy flame culling")
+
+	return false
+end
+
 -- Every enemy flame effect goes through this driver: the AI's effect templates call
 -- it for the flamer, the beast of nurgle's vomit and the linked beams. The jet is
 -- created by start_shooting_fx and the hit sparks and ground fire by
 -- update_shooting_fx, which creates them itself, so both need the same guard. The
 -- player's own flamer is a different path (FlamerGasEffects) and is untouched.
 mod:hook(Flamer, "start_shooting_fx", function(func, t, unit, vfx, sfx, wwise_world, world, data, ...)
-	if enemy_flames_hidden(unit) then
+	if enemy_flame_dropped(unit) then
 		return
 	end
 
@@ -502,7 +551,7 @@ mod:hook(Flamer, "start_shooting_fx", function(func, t, unit, vfx, sfx, wwise_wo
 end)
 
 mod:hook(Flamer, "update_shooting_fx", function(func, t, unit, vfx, sfx, wwise_world, world, physics_world, aim_position, control_point_1, control_point_2, data, ...)
-	if enemy_flames_hidden(unit) then
+	if enemy_flame_dropped(unit) then
 		return
 	end
 
@@ -734,6 +783,14 @@ local function scale_stream_life(self, action_settings, intensity)
 	World.set_particles_variable(self._world, stream_effect_id, variable_index, Vector3(life, life, life))
 end
 
+-- The decision plus the settings it needs, so a surprise anywhere inside it can be
+-- caught and the frame handed straight back to vanilla.
+local function flamer_intensity_for(self)
+	local action_settings = Action.current_action_settings_from_component(self._weapon_action_component, self._weapon_actions)
+
+	return instance_intensity(self, action_settings), action_settings
+end
+
 -- Wrapping rather than replacing _update_effects: when nothing is configured vanilla
 -- runs untouched (no copied body to drift out of date and no extra work). When it is,
 -- the pose lookup, the particle variable lookup and the Vector3s and Quaternions
@@ -744,8 +801,13 @@ mod:hook(CLASS.FlamerGasEffects, "_update_effects", function(func, self, dt, t)
 		return func(self, dt, t)
 	end
 
-	local action_settings = Action.current_action_settings_from_component(self._weapon_action_component, self._weapon_actions)
-	local intensity = instance_intensity(self, action_settings)
+	local ok, intensity, action_settings = pcall(flamer_intensity_for, self)
+
+	if not ok then
+		fell_back("the flame intensity")
+
+		return func(self, dt, t)
+	end
 
 	if DEBUG_INTENSITY then
 		report(string.format("flamer: instance (husk %s, local %s), active action damage type %s -> %d%%", tostring(self._is_husk), tostring(self._is_local_unit), tostring(action_settings and action_settings.fire_configuration and action_settings.fire_configuration.damage_type), intensity))
@@ -762,8 +824,8 @@ mod:hook(CLASS.FlamerGasEffects, "_update_effects", function(func, self, dt, t)
 
 		func(self, dt, t)
 
-		scale_stream_life(self, action_settings, intensity)
-		thin_impact_decals(self, intensity)
+		pcall(scale_stream_life, self, action_settings, intensity)
+		pcall(thin_impact_decals, self, intensity)
 
 		return
 	end
