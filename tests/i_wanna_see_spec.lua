@@ -7,6 +7,7 @@ local VANILLA = {
 	flamer_intensity = 100,
 	smite_intensity = 100,
 	electro_intensity = 100,
+	enemy_flame_intensity = 100,
 }
 
 local function merged(overrides)
@@ -468,6 +469,95 @@ describe("i_wanna_see", function()
 			f.pilot_create({})
 
 			assert.are.equal(1, f.count("FlamerPilotLightEffects._create_effects"), "created by vanilla")
+		end)
+	end)
+
+	describe("enemy flames", function()
+		local enemy = { name = "enemy_flamer" }
+		local ally = { name = "ally_flamer" }
+		local stranger = { name = "prop" }
+
+		before_each(function()
+			f.put_unit_on_side(enemy, "enemies")
+			f.put_unit_on_side(ally, "players")
+		end)
+
+		it("leaves every enemy flame alone at full intensity", function()
+			f.set_settings(merged())
+			f.reset()
+
+			f.flamer_start_shooting(1, enemy)
+			f.flamer_update_shooting(1, enemy)
+
+			assert.are.equal(1, f.count("Flamer.start_shooting_fx"), "jet created by vanilla")
+			assert.are.equal(1, f.count("Flamer.update_shooting_fx"), "sparks and ground fire left to vanilla")
+		end)
+
+		it("removes every enemy flame at 0%", function()
+			f.set_settings(merged({ enemy_flame_intensity = 0 }))
+			f.reset()
+
+			f.flamer_start_shooting(1, enemy)
+			f.flamer_update_shooting(1, enemy)
+
+			assert.are.equal(0, f.count("Flamer.start_shooting_fx"), "jet skipped")
+			assert.are.equal(0, f.count("Flamer.update_shooting_fx"), "sparks and ground fire skipped")
+		end)
+
+		it("never touches units on the player's side", function()
+			f.set_settings(merged({ enemy_flame_intensity = 0 }))
+			f.reset()
+
+			f.flamer_start_shooting(1, ally)
+			f.flamer_start_shooting(1, f.player_unit)
+
+			assert.are.equal(2, f.count("Flamer.start_shooting_fx"), "own side untouched")
+		end)
+
+		it("never touches units the side system does not know about", function()
+			f.set_settings(merged({ enemy_flame_intensity = 0 }))
+			f.reset()
+
+			f.flamer_start_shooting(1, stranger)
+
+			assert.are.equal(1, f.count("Flamer.start_shooting_fx"), "unknown units left to vanilla")
+		end)
+
+		it("drops a stable share of enemies at partial intensity", function()
+			f.set_settings(merged({ enemy_flame_intensity = 50 }))
+
+			f.set_random(0.9)
+			f.reset()
+
+			f.flamer_start_shooting(1, enemy)
+
+			assert.are.equal(0, f.count("Flamer.start_shooting_fx"), "enemy dropped")
+
+			f.set_random(0.1)
+			f.reset()
+
+			f.flamer_start_shooting(1, enemy)
+
+			assert.are.equal(0, f.count("Flamer.start_shooting_fx"), "the decision is stable per enemy")
+
+			local other = { name = "other_flamer" }
+
+			f.put_unit_on_side(other, "enemies")
+			f.reset()
+
+			f.flamer_start_shooting(1, other)
+
+			assert.are.equal(1, f.count("Flamer.start_shooting_fx"), "another enemy keeps its flame")
+		end)
+
+		it("follows the setting when it changes at runtime", function()
+			f.set_settings(merged({ enemy_flame_intensity = 0 }))
+			f.set_setting("enemy_flame_intensity", 100)
+			f.reset()
+
+			f.flamer_start_shooting(1, enemy)
+
+			assert.are.equal(1, f.count("Flamer.start_shooting_fx"), "cache refreshed by on_setting_changed")
 		end)
 	end)
 end)

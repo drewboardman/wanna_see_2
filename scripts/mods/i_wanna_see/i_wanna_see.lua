@@ -2,6 +2,7 @@ local mod = get_mod("i_wanna_see")
 
 local Action = require("scripts/utilities/action/action")
 local ChainLightningTarget = require("scripts/utilities/action/chain_lightning_target")
+local Flamer = require("scripts/utilities/flamer")
 
 local package_name = "content/levels/training_grounds/missions/mission_tg_basic_combat_01"
 local decal_unit_name = "content/levels/training_grounds/fx/decal_aoe_indicator"
@@ -19,6 +20,7 @@ local PURGATUS_INTENSITY = 0
 local FLAMER_INTENSITY = 0
 local SMITE_INTENSITY = 0
 local ELECTRO_INTENSITY = 0
+local ENEMY_FLAME_INTENSITY = 100
 local REMOVE_SHIELD_EFFECT = false
 local REMOVE_SHIELD_SOUND = false
 local DISPLAY_SHIELD_RADIUS = false
@@ -54,6 +56,9 @@ local function refresh_settings(setting_id)
 	end
 	if not setting_id or setting_id == "electro_intensity" then
 		ELECTRO_INTENSITY = intensity_of("electro_intensity")
+	end
+	if not setting_id or setting_id == "enemy_flame_intensity" then
+		ENEMY_FLAME_INTENSITY = intensity_of("enemy_flame_intensity")
 	end
 	if not setting_id or setting_id == "remove_shield_effect" then
 		REMOVE_SHIELD_EFFECT = mod:get("remove_shield_effect") == true
@@ -305,6 +310,87 @@ mod:hook(CLASS.ChainLightningLinkEffects, "_find_no_target", function(func, self
 	end
 
 	return func(self, t)
+end)
+
+-- Whether a unit is on a side that the local player's side counts as an enemy. The
+-- game decides who may shoot whom this way, and anything it does not know about
+-- returns false, so the player's own unit and their allies are never touched.
+local function unit_is_enemy_of_local_player(unit)
+	local side_system = Managers.state.extension and Managers.state.extension:system("side_system")
+
+	if not side_system or not unit then
+		return false
+	end
+
+	local side = side_system.side_by_unit[unit]
+
+	if not side then
+		return false
+	end
+
+	local local_player = Managers.player and Managers.player:local_player()
+	local local_unit = local_player and local_player.player_unit
+	local local_side = local_unit and side_system.side_by_unit[local_unit]
+
+	if not local_side then
+		return false
+	end
+
+	local enemy_side_names = local_side:relation_side_names("enemy")
+	local side_name = side:name()
+
+	for i = 1, #enemy_side_names do
+		if enemy_side_names[i] == side_name then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Decided once per enemy, so a flame that is dropped stays dropped instead of
+-- flickering in and out from frame to frame.
+local hidden_flame_units = setmetatable({}, { __mode = "k" })
+
+local function enemy_flames_hidden(unit)
+	if ENEMY_FLAME_INTENSITY >= 100 or not unit_is_enemy_of_local_player(unit) then
+		return false
+	end
+
+	if ENEMY_FLAME_INTENSITY <= 0 then
+		return true
+	end
+
+	local hidden = hidden_flame_units[unit]
+
+	if hidden == nil then
+		hidden = math.random() > ENEMY_FLAME_INTENSITY / 100
+
+		hidden_flame_units[unit] = hidden
+	end
+
+	return hidden
+end
+
+-- Every enemy flame effect goes through this driver: the AI's effect templates call
+-- it for the flamer, the beast of nurgle's vomit and the linked beams. The jet is
+-- created by start_shooting_fx and the hit sparks and ground fire by
+-- update_shooting_fx, which creates them itself, so both need the same guard. The
+-- player's own flamer is a different path (FlamerGasEffects) and is untouched.
+mod:hook(Flamer, "start_shooting_fx", function(func, t, unit, vfx, sfx, wwise_world, world, data, ...)
+	if enemy_flames_hidden(unit) then
+		return
+	end
+
+	return func(t, unit, vfx, sfx, wwise_world, world, data, ...)
+end)
+
+mod:hook(Flamer, "update_shooting_fx", function(func, t, unit, vfx, sfx, wwise_world, world, physics_world, aim_position, control_point_1, control_point_2, data, ...)
+	if enemy_flames_hidden(unit) then
+		return
+	end
+
+	return func(t, unit, vfx, sfx, wwise_world, world, physics_world, aim_position, control_point_1, control_point_2, data, ...)
 end)
 
 local function damage_type_intensity(damage_type)

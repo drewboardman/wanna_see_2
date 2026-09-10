@@ -10,6 +10,7 @@ A Darktide mod that reduces or removes the sources of VFX that block your vision
 | Zealot Flamer intensity | Flamer gas stream, scorch marks and pilot light |
 | Smite lightning intensity | Smite beams and the arc drawn when nothing is targeted |
 | Electrokinetic Staff lightning intensity | The staff's chains, tracked separately from Smite |
+| Enemy flamers | The jet, hit sparks and ground fire that AI flamers draw |
 | Psyker Shield Settings | Remove the shield mesh, remove its sound, and/or draw an AoE radius on the floor in a colour you pick |
 
 Intensities run from 0% to 100%:
@@ -20,6 +21,10 @@ Intensities run from 0% to 100%:
   normal life, which is what the stream's cost is made of, and its scorch decals are
   thinned by the same ratio. Chain lightning spawns that share of its links, keeping
   every other one at 50% rather than flipping a coin per link.
+
+The enemy flamer option is the exception: it defaults to 100%, because that flame is
+also a warning, and it drops a share of *enemies* rather than a share of frames. Each
+enemy is decided once, so a flame that goes away stays away.
 
 Options are read once at load and refreshed when they change, so they can be toggled
 in the mod options menu without a restart.
@@ -60,6 +65,11 @@ whenever an effect is left at 100%:
 - `PsykerForceFieldUnitExtension.init` / `_trigger_death_effects` — vanilla runs
   first and only the unwanted parts are removed afterwards, so shield behaviour
   (width, deployable durations, particles, sounds, flow events) stays the game's.
+- `Flamer.start_shooting_fx` / `Flamer.update_shooting_fx` — the driver every AI flame
+  effect template uses (the flamers, the beast of nurgle's vomit, linked beams). Both
+  are hooked because the update creates the hit sparks and ground fire itself. Enemy
+  units are identified through the game's own side system, so the player and their
+  allies are never touched, and an unknown unit is left alone.
 - The partial flame intensity mirrors the game's own `distance / speed` life
   calculation. If that data is ever missing, the scaling is skipped and the effect is
   simply drawn at full strength.

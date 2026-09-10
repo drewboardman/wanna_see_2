@@ -29,6 +29,12 @@ return {
 	electro_intensity_description = {
 		en = "The staff's chains are tracked separately from Smite, so you can keep one and remove the other, or thin either out.",
 	},
+	enemy_flame_intensity = {
+		en = "Enemy flamers, 100% leaves them alone",
+	},
+	enemy_flame_intensity_description = {
+		en = "How many enemy flamers still draw their jet, hit sparks and ground fire. Each enemy is decided once, so they never flicker. Defaults to 100% because the flame is also a warning, and it is the only thing here the game does not draw for you.",
+	},
 	remove_shield_effect = {
 		en = "Remove Psyker shield effects",
 	},

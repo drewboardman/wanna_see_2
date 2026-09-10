@@ -35,6 +35,13 @@ return {
 				decimals_number = 0,
 			},
 			{
+				setting_id = "enemy_flame_intensity",
+				type = "numeric",
+				default_value = 100,
+				range = { 0, 100 },
+				decimals_number = 0,
+			},
+			{
 				setting_id = "shield_group",
 				type = "group",
 				sub_widgets = {

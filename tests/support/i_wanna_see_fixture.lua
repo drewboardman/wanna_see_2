@@ -49,7 +49,30 @@ local function fixture()
 	local unit = { name = "unit" }
 	local last_decal_color = nil
 	local last_stream_life = nil
+	local local_player_unit = { name = "local_player_unit" }
+	local random_value = 0.5
 	local env = setmetatable({}, { __index = _G })
+
+	-- Only the shape the mod reads off a side is needed: its name, and the names of
+	-- the sides it counts as enemies.
+	local function make_side(name, enemy_side_names)
+		return {
+			name = function() return name end,
+			relation_side_names = function(_, relation)
+				if relation == "enemy" then
+					return enemy_side_names
+				end
+
+				return {}
+			end,
+		}
+	end
+
+	local sides = {
+		players = make_side("players", { "enemies" }),
+		enemies = make_side("enemies", { "players" }),
+	}
+	local side_system = { side_by_unit = { [local_player_unit] = sides.players } }
 
 	-- Stingray extends the table library; plain LuaJIT does not have this.
 	env.table = setmetatable({
@@ -154,8 +177,32 @@ local function fixture()
 			has_loaded = function() return true end,
 			load = function() record("Managers.package.load") end,
 		},
-		state = {},
+		player = {
+			local_player = function()
+				return { player_unit = local_player_unit }
+			end,
+		},
+		state = {
+			extension = {
+				system = function(_, name)
+					if name == "side_system" then
+						return side_system
+					end
+				end,
+			},
+		},
 	}
+
+	-- The mod decides a per-enemy share of flames to drop, so the roll is pinned.
+	env.math = setmetatable({
+		random = function()
+			return random_value
+		end,
+	}, { __index = math })
+
+	local Flamer = {}
+	Flamer.start_shooting_fx = function() record("Flamer.start_shooting_fx") end
+	Flamer.update_shooting_fx = function() record("Flamer.update_shooting_fx") end
 
 	local ChainLightningTarget = {}
 	ChainLightningTarget.add_child = function(self, on_add_func, func_context, ...)
@@ -208,6 +255,8 @@ local function fixture()
 			}
 		elseif path == "scripts/utilities/action/chain_lightning_target" then
 			return ChainLightningTarget
+		elseif path == "scripts/utilities/flamer" then
+			return Flamer
 		end
 
 		error("Unexpected game dependency: " .. tostring(path))
@@ -247,6 +296,7 @@ local function fixture()
 			flamer_intensity = 100,
 			smite_intensity = 100,
 			electro_intensity = 100,
+			enemy_flame_intensity = 100,
 			remove_shield_effect = false,
 			remove_shield_sound = false,
 			display_shield_radius = false,
@@ -292,6 +342,15 @@ local function fixture()
 		flamer_update = env.CLASS.FlamerGasEffects._update_effects,
 		chain_add_child = ChainLightningTarget.add_child,
 		find_no_target = env.CLASS.ChainLightningLinkEffects._find_no_target,
+		flamer_start_shooting = Flamer.start_shooting_fx,
+		flamer_update_shooting = Flamer.update_shooting_fx,
+		player_unit = local_player_unit,
+		put_unit_on_side = function(target_unit, side_name)
+			side_system.side_by_unit[target_unit] = sides[side_name]
+		end,
+		set_random = function(value)
+			random_value = value
+		end,
 		shield_init = env.CLASS.PsykerForceFieldUnitExtension.init,
 		shield_death = env.CLASS.PsykerForceFieldUnitExtension._trigger_death_effects,
 		pilot_create = env.CLASS.FlamerPilotLightEffects._create_effects,
