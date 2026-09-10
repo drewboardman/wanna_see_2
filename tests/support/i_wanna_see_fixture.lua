@@ -47,6 +47,8 @@ local function fixture()
 	local settings = {}
 	local action_settings = nil
 	local unit = { name = "unit" }
+	local last_decal_color = nil
+	local last_stream_life = nil
 	local env = setmetatable({}, { __index = _G })
 
 	-- Stingray extends the table library; plain LuaJIT does not have this.
@@ -73,12 +75,25 @@ local function fixture()
 
 		return v
 	end
+	env.Vector3.length = function(v)
+		record("Vector3.length")
+
+		return v.x or 0
+	end
+
+	env.Matrix4x4 = {
+		translation = function() return vec(0, 0, 0) end,
+	}
 
 	env.Quaternion = {
 		identity = function()
 			return { w = 1 }
 		end,
-		set_xyzw = function(quad)
+		set_xyzw = function(quad, x, y, z, w)
+			record("Quaternion.set_xyzw")
+
+			last_decal_color = { x, y, z, w }
+
 			return quad
 		end,
 		forward = function()
@@ -108,7 +123,11 @@ local function fixture()
 		are_particles_playing = function() return true end,
 		move_particles = function() record("World.move_particles") end,
 		find_particles_variable = function() record("World.find_particles_variable") return 1 end,
-		set_particles_variable = function() record("World.set_particles_variable") end,
+		set_particles_variable = function(_, effect_id, variable_index, value)
+			record("World.set_particles_variable")
+
+			last_stream_life = value
+		end,
 	}
 
 	env.Unit = {
@@ -224,16 +243,14 @@ local function fixture()
 
 	local function set_settings(overrides)
 		settings = {
-			remove_purgatus_effect = false,
-			remove_flamer_effect = false,
-			remove_smite_effect = false,
-			remove_electro_effect = false,
+			purgatus_intensity = 100,
+			flamer_intensity = 100,
+			smite_intensity = 100,
+			electro_intensity = 100,
 			remove_shield_effect = false,
 			remove_shield_sound = false,
 			display_shield_radius = false,
-			R = 10,
-			G = 20,
-			B = 30,
+			shield_radius_color = { 255, 0, 0, 4 },
 		}
 
 		for key, value in pairs(overrides or {}) do
@@ -259,6 +276,12 @@ local function fixture()
 		hooks = registered,
 		count = count,
 		reset = reset,
+		decal_color = function()
+			return last_decal_color
+		end,
+		stream_life = function()
+			return last_stream_life
+		end,
 		set_settings = set_settings,
 		set_setting = set_setting,
 		set_action_settings = set_action_settings,
@@ -291,6 +314,18 @@ local function fixture()
 				_stream_effect_id = nil,
 				_first_person_component = { rotation = {} },
 				_action_flamer_gas_component = { range = 10 },
+				_action_module_position_finder_component = { position = env.Vector3(0, 0, 0), position_valid = false },
+				_fx_extension = {
+					vfx_spawner_pose = function()
+						record("vfx_spawner_pose")
+
+						return {}
+					end,
+					should_play_husk_effect = function()
+						return false
+					end,
+				},
+				_fx_source_name = "_muzzle",
 			}
 
 			self._destroy_effects = function(_, allow_move, rotation)

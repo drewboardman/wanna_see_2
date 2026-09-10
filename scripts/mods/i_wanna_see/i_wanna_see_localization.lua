@@ -3,39 +3,46 @@ return {
 		en = "I Wanna See",
 	},
 	mod_description = {
-		en = "Remove sources of VFX that block vision",
+		en = "Reduce or remove sources of VFX that block vision",
 	},
-	remove_purgatus_effect = {
-		en = "Remove Inferno Staff Effects"
+	purgatus_intensity = {
+		en = "Inferno Staff intensity, 0% removes it",
 	},
-	remove_flamer_effect = {
-		en = "Remove Zealot Flamer Effects"
+	purgatus_intensity_description = {
+		en = "0% removes the Purgatus flame entirely. Values in between shorten how long the flame particles live, which is what its cost is made of, and thin out its ground scorch marks.",
 	},
-	remove_smite_effect = {
-		en = "Remove Smite Lightning Effects"
+	flamer_intensity = {
+		en = "Zealot Flamer intensity, 0% removes it",
 	},
-	remove_electro_effect = {
-		en = "Remove Electro Staff Lightning Effects"
+	flamer_intensity_description = {
+		en = "0% removes the flamer's gas stream, pilot light and scorch marks. Values in between shorten how long the flame particles live and thin out its ground scorch marks.",
+	},
+	smite_intensity = {
+		en = "Smite lightning intensity, 0% removes it",
+	},
+	smite_intensity_description = {
+		en = "0% removes the Smite beams and the arc drawn when nothing is targeted. Values in between only spawn that share of the chain links.",
+	},
+	electro_intensity = {
+		en = "Electrokinetic Staff lightning intensity, 0% removes it",
+	},
+	electro_intensity_description = {
+		en = "The staff's chains are tracked separately from Smite, so you can keep one and remove the other, or thin either out.",
 	},
 	remove_shield_effect = {
-		en = "Remove Psyker shield effects"
+		en = "Remove Psyker shield effects",
 	},
 	remove_shield_sound = {
-		en = "Remove Psyker shield sounds"
+		en = "Remove Psyker shield sounds",
 	},
 	display_shield_radius = {
-		en = "Display an AoE radius on the floor"
+		en = "Display an AoE radius on the floor",
+	},
+	shield_radius_color = {
+		en = "Shield AoE radius colour",
 	},
 	shield_group = {
-		en = "Psyker Shield Settings"
-	},
-	R = {
-		en = "Shield AoE radius (Red)"
-	},
-	G = {
-		en = "Shield AoE radius (Green)"
-	},
-	B = {
-		en = "Shield AoE radius (Blue)"
+		en = "Psyker Shield Settings",
 	},
 }
+

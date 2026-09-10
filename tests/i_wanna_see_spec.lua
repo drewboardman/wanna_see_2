@@ -1,5 +1,27 @@
 local fixture = require("tests.support.i_wanna_see_fixture")
 
+-- Intensities are percentages: 100 leaves vanilla alone, 0 removes the effect, and
+-- values in between scale how much of it is drawn.
+local VANILLA = {
+	purgatus_intensity = 100,
+	flamer_intensity = 100,
+	smite_intensity = 100,
+	electro_intensity = 100,
+}
+
+local function merged(overrides)
+	local settings = {}
+
+	for key, value in pairs(VANILLA) do
+		settings[key] = value
+	end
+	for key, value in pairs(overrides or {}) do
+		settings[key] = value
+	end
+
+	return settings
+end
+
 describe("i_wanna_see", function()
 	local f
 
@@ -17,8 +39,8 @@ describe("i_wanna_see", function()
 	end)
 
 	describe("flamer", function()
-		it("runs vanilla and never reads a setting when every option is off", function()
-			f.set_settings()
+		it("runs vanilla and never reads a setting at full intensity", function()
+			f.set_settings(merged())
 			f.set_action_settings({ fire_configuration = { damage_type = "warpfire" } })
 			f.reset()
 
@@ -28,8 +50,8 @@ describe("i_wanna_see", function()
 			assert.are.equal(0, f.count("Action.current_action_settings_from_component"), "settings are not consulted")
 		end)
 
-		it("skips the vanilla body and tears the stream down when suppressed", function()
-			f.set_settings({ remove_purgatus_effect = true })
+		it("skips the vanilla body and tears the stream down at 0%", function()
+			f.set_settings(merged({ purgatus_intensity = 0 }))
 			f.set_action_settings({ fire_configuration = { damage_type = "warpfire" } })
 			f.reset()
 			local flamer = f.new_flamer_self()
@@ -41,12 +63,11 @@ describe("i_wanna_see", function()
 			assert.are.equal(1, f.count("self._update_moving_lingering_effects"), "lingering particles still updated")
 			assert.are.equal(true, flamer._destroy_args.allow_move, "allow_move passed")
 			assert.are.equal(nil, flamer._destroy_args.rotation, "nil rotation accepted with no stream")
-			assert.are.equal(1, f.count("Action.current_action_settings_from_component"), "settings read once")
 			assert.are.equal(0, f.count("World.find_particles_variable"), "no particle variable lookup")
 		end)
 
 		it("builds a rotation once when the stream is still alive", function()
-			f.set_settings({ remove_purgatus_effect = true })
+			f.set_settings(merged({ purgatus_intensity = 0 }))
 			f.set_action_settings({ fire_configuration = { damage_type = "warpfire" } })
 			f.reset()
 			local flamer = f.new_flamer_self()
@@ -57,11 +78,10 @@ describe("i_wanna_see", function()
 
 			assert.is_not_nil(flamer._destroy_args.rotation, "rotation built for _destroy_effects")
 			assert.are.equal(1, f.count("Quaternion.look"), "rotation built exactly once")
-			assert.are.equal(0, f.count("World.find_particles_variable"), "no particle variable lookup")
 		end)
 
-		it("drops impacts that were queued before the suppression", function()
-			f.set_settings({ remove_purgatus_effect = true })
+		it("drops impacts that were queued before the removal", function()
+			f.set_settings(merged({ purgatus_intensity = 0 }))
 			f.set_action_settings({ fire_configuration = { damage_type = "warpfire" } })
 			f.reset()
 			local flamer = f.new_flamer_self()
@@ -75,8 +95,67 @@ describe("i_wanna_see", function()
 			assert.is_nil(flamer._impact_data[1].effect_name, "queued impact effect cleared")
 		end)
 
-		it("leaves a burning weapon alone while only purgatus removal is on", function()
-			f.set_settings({ remove_purgatus_effect = true })
+		it("scales the particle life at partial intensity", function()
+			f.set_settings(merged({ purgatus_intensity = 50 }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._stream_effect_id = {}
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(1, f.count("FlamerGasEffects._update_effects"), "vanilla body still runs")
+			assert.are.equal(1, f.count("World.set_particles_variable"), "particle variable set")
+			assert.are.equal(2.5, f.stream_life().x, "life is halved (range 10 / speed 2 * 50%)")
+		end)
+
+		it("thins the scorch marks by an exact ratio at partial intensity", function()
+			f.set_settings(merged({ purgatus_intensity = 50 }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			local flamer = f.new_flamer_self()
+
+			flamer._impact_data[1].time = 5
+			flamer._impact_index = 2
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.is_nil(flamer._impact_data[1].time, "first queued decal dropped")
+
+			flamer._impact_data[2].time = 6
+			flamer._impact_index = 3
+
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(6, flamer._impact_data[2].time, "second queued decal kept")
+		end)
+
+		it("caches the particle variable lookup per effect name", function()
+			f.set_settings(merged({ purgatus_intensity = 50 }))
+			f.set_action_settings({
+				fire_configuration = { damage_type = "warpfire" },
+				fx = { stream_effect = { speed = 2, name = "content/fx/test_stream" } },
+			})
+			f.reset()
+			local flamer = f.new_flamer_self()
+
+			flamer._stream_effect_id = {}
+
+			f.flamer_update(flamer, 0.1, 1)
+			f.flamer_update(flamer, 0.1, 1)
+
+			assert.are.equal(1, f.count("World.find_particles_variable"), "looked up once, not once per frame")
+			assert.are.equal(2, f.count("World.set_particles_variable"), "still set every frame")
+		end)
+
+		it("leaves a burning weapon alone while only purgatus is configured", function()
+			f.set_settings(merged({ purgatus_intensity = 0 }))
 			f.set_action_settings({ fire_configuration = { damage_type = "burning" } })
 			f.reset()
 
@@ -85,18 +164,8 @@ describe("i_wanna_see", function()
 			assert.are.equal(1, f.count("FlamerGasEffects._update_effects"), "vanilla untouched")
 		end)
 
-		it("suppresses a weapon that uses the plural fire configurations", function()
-			f.set_settings({ remove_purgatus_effect = true })
-			f.set_action_settings({ fire_configurations = { { damage_type = "warpfire" } } })
-			f.reset()
-
-			f.flamer_update(f.new_flamer_self(), 0.1, 1)
-
-			assert.are.equal(0, f.count("FlamerGasEffects._update_effects"), "plural all-warpfire suppressed")
-		end)
-
-		it("leaves a mixed plural weapon to vanilla", function()
-			f.set_settings({ remove_purgatus_effect = true })
+		it("suppresses a weapon whose plural configurations are all removed", function()
+			f.set_settings(merged({ purgatus_intensity = 0, flamer_intensity = 0 }))
 			f.set_action_settings({
 				fire_configurations = { { damage_type = "warpfire" }, { damage_type = "burning" } },
 			})
@@ -104,14 +173,26 @@ describe("i_wanna_see", function()
 
 			f.flamer_update(f.new_flamer_self(), 0.1, 1)
 
-			assert.are.equal(1, f.count("FlamerGasEffects._update_effects"), "mixed configurations left alone")
+			assert.are.equal(0, f.count("FlamerGasEffects._update_effects"), "suppressed")
 		end)
 
-		it("follows the setting when it changes at runtime", function()
-			f.set_settings({ remove_purgatus_effect = true })
+		it("takes the most restrictive of several configurations", function()
+			f.set_settings(merged({ purgatus_intensity = 0, flamer_intensity = 100 }))
+			f.set_action_settings({
+				fire_configurations = { { damage_type = "warpfire" }, { damage_type = "burning" } },
+			})
+			f.reset()
+
+			f.flamer_update(f.new_flamer_self(), 0.1, 1)
+
+			assert.are.equal(0, f.count("FlamerGasEffects._update_effects"), "a removed configuration wins")
+		end)
+
+		it("follows the intensity when it changes at runtime", function()
+			f.set_settings(merged({ purgatus_intensity = 0 }))
 			f.set_action_settings({ fire_configuration = { damage_type = "warpfire" } })
 
-			f.set_setting("remove_purgatus_effect", false)
+			f.set_setting("purgatus_intensity", 100)
 			f.reset()
 
 			f.flamer_update(f.new_flamer_self(), 0.1, 1)
@@ -122,7 +203,7 @@ describe("i_wanna_see", function()
 
 	describe("chain lightning", function()
 		it("suppresses Smite beams but keeps the node tree and hit_units bookkeeping", function()
-			f.set_settings({ remove_smite_effect = true })
+			f.set_settings(merged({ smite_intensity = 0 }))
 			f.set_action_settings({ chain_settings = { staff = false } })
 			f.reset()
 			local context = f.new_chain_context()
@@ -137,7 +218,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("classifies a source once and reuses it", function()
-			f.set_settings({ remove_smite_effect = true })
+			f.set_settings(merged({ smite_intensity = 0 }))
 			f.set_action_settings({ chain_settings = { staff = false } })
 			local context = f.new_chain_context()
 
@@ -149,18 +230,19 @@ describe("i_wanna_see", function()
 			assert.are.equal(0, f.count("Action.current_action_settings_from_component"), "classification cached")
 		end)
 
-		it("leaves the chain alone when the option is off", function()
-			f.set_settings()
+		it("leaves the chain alone at full intensity", function()
+			f.set_settings(merged())
 			f.set_action_settings({ chain_settings = { staff = false } })
 			f.reset()
 
 			f.chain_add_child({}, f.vanilla_callback(), f.new_chain_context())
 
 			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "vanilla callback used")
+			assert.are.equal(0, f.count("Action.current_action_settings_from_component"), "sources are not even classified")
 		end)
 
-		it("keeps electrokinetic staff beams while remove_electro_effect is off", function()
-			f.set_settings({ remove_smite_effect = true })
+		it("keeps electrokinetic staff beams while only Smite is removed", function()
+			f.set_settings(merged({ smite_intensity = 0 }))
 			f.set_action_settings({ chain_settings = { staff = true } })
 			f.reset()
 
@@ -169,8 +251,8 @@ describe("i_wanna_see", function()
 			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "staff beams kept")
 		end)
 
-		it("suppresses staff beams once remove_electro_effect is on", function()
-			f.set_settings({ remove_smite_effect = true, remove_electro_effect = true })
+		it("suppresses staff beams when the staff is at 0%", function()
+			f.set_settings(merged({ smite_intensity = 100, electro_intensity = 0 }))
 			f.set_action_settings({ chain_settings = { staff = true } })
 			f.reset()
 			local context = f.new_chain_context()
@@ -181,18 +263,44 @@ describe("i_wanna_see", function()
 			assert.is_true(context.hit_units[f.unit], "hit_units bookkeeping preserved")
 		end)
 
-		it("suppresses the no target arc, which is spawned outside add_child", function()
-			f.set_settings({ remove_smite_effect = true })
+		it("keeps every other link at partial intensity", function()
+			f.set_settings(merged({ smite_intensity = 50 }))
+			f.set_action_settings({ chain_settings = { staff = false } })
+			f.reset()
+			local context = f.new_chain_context()
+
+			f.chain_add_child({}, f.vanilla_callback(), context)
+			assert.are.equal(0, f.count("ORIGINAL_ON_ADD"), "first link dropped")
+
+			f.chain_add_child({}, f.vanilla_callback(), context)
+			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "second link kept")
+
+			f.chain_add_child({}, f.vanilla_callback(), context)
+			assert.are.equal(1, f.count("ORIGINAL_ON_ADD"), "third link dropped")
+
+			f.chain_add_child({}, f.vanilla_callback(), context)
+			assert.are.equal(2, f.count("ORIGINAL_ON_ADD"), "fourth link kept")
+		end)
+
+		it("suppresses the no target arc only when the chain is removed", function()
+			f.set_settings(merged({ smite_intensity = 0 }))
 			f.set_action_settings({ chain_settings = { staff = false } })
 			f.reset()
 
 			f.find_no_target({ _func_context = f.new_chain_context() }, 1)
 
 			assert.are.equal(0, f.count("ChainLightningLinkEffects._find_no_target"), "arc skipped")
+
+			f.set_settings(merged({ smite_intensity = 50 }))
+			f.reset()
+
+			f.find_no_target({ _func_context = f.new_chain_context() }, 1)
+
+			assert.are.equal(1, f.count("ChainLightningLinkEffects._find_no_target"), "arc kept while thinning")
 		end)
 
-		it("leaves the no target arc to vanilla when the option is off", function()
-			f.set_settings()
+		it("leaves the no target arc to vanilla at full intensity", function()
+			f.set_settings(merged())
 			f.reset()
 
 			f.find_no_target({ _func_context = f.new_chain_context() }, 1)
@@ -203,7 +311,7 @@ describe("i_wanna_see", function()
 
 	describe("psyker shield", function()
 		it("runs vanilla init and changes nothing when every option is off", function()
-			f.set_settings()
+			f.set_settings(merged())
 			f.reset()
 
 			f.shield_init(f.new_shield_self())
@@ -216,7 +324,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("stops the start sound, removes the start particle and spawns the decal when all options are on", function()
-			f.set_settings({ remove_shield_sound = true, remove_shield_effect = true, display_shield_radius = true })
+			f.set_settings(merged({ remove_shield_sound = true, remove_shield_effect = true, display_shield_radius = true }))
 			f.reset()
 			local shield = f.new_shield_self()
 
@@ -231,11 +339,24 @@ describe("i_wanna_see", function()
 			assert.is_nil(shield._effect_id, "effect id cleared")
 			assert.are.equal(1, f.count("Unit.set_unit_visibility"), "shield mesh hidden")
 			assert.are.equal(1, f.count("World.spawn_unit_ex"), "radius decal spawned")
-			assert.are.equal(1, f.count("Unit.set_vector4_for_material"), "decal colour applied")
+		end)
+
+		it("takes the decal colour from the color widget", function()
+			f.set_settings(merged({ display_shield_radius = true, shield_radius_color = { 255, 8, 9, 10 } }))
+			f.reset()
+
+			f.shield_init(f.new_shield_self({}))
+
+			local color = f.decal_color()
+
+			assert.are.equal(8, color[1], "red channel")
+			assert.are.equal(9, color[2], "green channel")
+			assert.are.equal(10, color[3], "blue channel")
+			assert.are.equal(0.5, color[4], "alpha left as vanilla draws it")
 		end)
 
 		it("removes the shield visuals without touching the sound when only the effect is on", function()
-			f.set_settings({ remove_shield_effect = true })
+			f.set_settings(merged({ remove_shield_effect = true }))
 			f.reset()
 
 			f.shield_init(f.new_shield_self())
@@ -246,7 +367,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("runs vanilla death effects when every option is off", function()
-			f.set_settings()
+			f.set_settings(merged())
 			f.reset()
 
 			f.shield_death(f.new_shield_self())
@@ -255,7 +376,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("never triggers a wwise event with a nil source once the sound is removed", function()
-			f.set_settings({ remove_shield_sound = true, remove_shield_effect = true })
+			f.set_settings(merged({ remove_shield_sound = true, remove_shield_effect = true }))
 			f.reset()
 			local shield = f.new_shield_self()
 
@@ -273,7 +394,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("keeps the fade particle when only the sound is removed", function()
-			f.set_settings({ remove_shield_sound = true })
+			f.set_settings(merged({ remove_shield_sound = true }))
 			f.reset()
 
 			f.shield_death(f.new_shield_self())
@@ -283,7 +404,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("runs vanilla for the sound and then removes the fade particle", function()
-			f.set_settings({ remove_shield_effect = true })
+			f.set_settings(merged({ remove_shield_effect = true }))
 			f.reset()
 			local shield = f.new_shield_self()
 
@@ -295,7 +416,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("destroys the radius decal on death even after the option is turned off", function()
-			f.set_settings({ display_shield_radius = true })
+			f.set_settings(merged({ display_shield_radius = true }))
 			f.reset()
 			local shield = f.new_shield_self({})
 
@@ -312,7 +433,7 @@ describe("i_wanna_see", function()
 		end)
 
 		it("clears decal bookkeeping when the game state changes", function()
-			f.set_settings({ display_shield_radius = true })
+			f.set_settings(merged({ display_shield_radius = true }))
 			f.shield_init(f.new_shield_self({}))
 
 			assert.has_no.errors(function()
@@ -322,8 +443,8 @@ describe("i_wanna_see", function()
 	end)
 
 	describe("flamer pilot light", function()
-		it("never creates the pilot light when the flamer option is on", function()
-			f.set_settings({ remove_flamer_effect = true })
+		it("never creates the pilot light when the flamer is removed", function()
+			f.set_settings(merged({ flamer_intensity = 0 }))
 			f.reset()
 
 			f.pilot_create({})
@@ -331,8 +452,17 @@ describe("i_wanna_see", function()
 			assert.are.equal(0, f.count("FlamerPilotLightEffects._create_effects"), "never created")
 		end)
 
-		it("lets vanilla create it when the option is off", function()
-			f.set_settings()
+		it("keeps the pilot light while the flame is only scaled down", function()
+			f.set_settings(merged({ flamer_intensity = 50 }))
+			f.reset()
+
+			f.pilot_create({})
+
+			assert.are.equal(1, f.count("FlamerPilotLightEffects._create_effects"), "created by vanilla")
+		end)
+
+		it("lets vanilla create it at full intensity", function()
+			f.set_settings(merged())
 			f.reset()
 
 			f.pilot_create({})

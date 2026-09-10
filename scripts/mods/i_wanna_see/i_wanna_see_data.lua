@@ -7,28 +7,36 @@ return {
 	options = {
 		widgets = {
 			{
-				setting_id = "remove_purgatus_effect",
-				type = "checkbox",
-				default_value = true,
+				setting_id = "purgatus_intensity",
+				type = "numeric",
+				default_value = 0,
+				range = { 0, 100 },
+				decimals_number = 0,
 			},
 			{
-				setting_id = "remove_smite_effect",
-				type = "checkbox",
-				default_value = true,
+				setting_id = "flamer_intensity",
+				type = "numeric",
+				default_value = 0,
+				range = { 0, 100 },
+				decimals_number = 0,
 			},
 			{
-				setting_id = "remove_electro_effect",
-				type = "checkbox",
-				default_value = true,
+				setting_id = "smite_intensity",
+				type = "numeric",
+				default_value = 0,
+				range = { 0, 100 },
+				decimals_number = 0,
 			},
 			{
-				setting_id = "remove_flamer_effect",
-				type = "checkbox",
-				default_value = true,
+				setting_id = "electro_intensity",
+				type = "numeric",
+				default_value = 0,
+				range = { 0, 100 },
+				decimals_number = 0,
 			},
 			{
-				setting_id  = "shield_group",
-				type        = "group",
+				setting_id = "shield_group",
+				type = "group",
 				sub_widgets = {
 					{
 						setting_id = "remove_shield_effect",
@@ -46,28 +54,14 @@ return {
 						default_value = true,
 					},
 					{
-						setting_id = "R",
-						type = "numeric",
-						default_value = 0,
-						range = {0, 255},
-						decimals_number = 0,  
+						setting_id = "shield_radius_color",
+						type = "color",
+						default_value = { 255, 0, 0, 4 },
+						has_alpha = false,
 					},
-					{
-						setting_id = "G",
-						type = "numeric",
-						default_value = 0,
-						range = {0, 255},
-						decimals_number = 0,  
-					},
-					{
-						setting_id = "B",
-						type = "numeric",
-						default_value = 4,
-						range = {0, 255},
-						decimals_number = 0,  
-					},
-				}
+				},
 			},
-		}
-	}
+		},
+	},
 }
+

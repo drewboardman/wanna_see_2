@@ -12,10 +12,13 @@ local PARTICLES_WALL = {
 -- Settings are cached in locals: the hot paths below run once per frame per flamer
 -- and per chain lightning source, and reading a local is cheaper than calling
 -- mod:get. mod.on_setting_changed keeps the cache current.
-local REMOVE_PURGATUS_EFFECT = false
-local REMOVE_FLAMER_EFFECT = false
-local REMOVE_SMITE_EFFECT = false
-local REMOVE_ELECTRO_EFFECT = false
+--
+-- The effect intensities are percentages: 0 removes the effect, 100 leaves vanilla
+-- alone, and anything in between scales how much of it is drawn.
+local PURGATUS_INTENSITY = 0
+local FLAMER_INTENSITY = 0
+local SMITE_INTENSITY = 0
+local ELECTRO_INTENSITY = 0
 local REMOVE_SHIELD_EFFECT = false
 local REMOVE_SHIELD_SOUND = false
 local DISPLAY_SHIELD_RADIUS = false
@@ -23,18 +26,34 @@ local DECAL_R = 0
 local DECAL_G = 0
 local DECAL_B = 4
 
+local function intensity_of(setting_id)
+	local value = mod:get(setting_id)
+
+	if type(value) ~= "number" then
+		return 0
+	end
+	if value <= 0 then
+		return 0
+	end
+	if value >= 100 then
+		return 100
+	end
+
+	return math.floor(value)
+end
+
 local function refresh_settings(setting_id)
-	if not setting_id or setting_id == "remove_purgatus_effect" then
-		REMOVE_PURGATUS_EFFECT = mod:get("remove_purgatus_effect") == true
+	if not setting_id or setting_id == "purgatus_intensity" then
+		PURGATUS_INTENSITY = intensity_of("purgatus_intensity")
 	end
-	if not setting_id or setting_id == "remove_flamer_effect" then
-		REMOVE_FLAMER_EFFECT = mod:get("remove_flamer_effect") == true
+	if not setting_id or setting_id == "flamer_intensity" then
+		FLAMER_INTENSITY = intensity_of("flamer_intensity")
 	end
-	if not setting_id or setting_id == "remove_smite_effect" then
-		REMOVE_SMITE_EFFECT = mod:get("remove_smite_effect") == true
+	if not setting_id or setting_id == "smite_intensity" then
+		SMITE_INTENSITY = intensity_of("smite_intensity")
 	end
-	if not setting_id or setting_id == "remove_electro_effect" then
-		REMOVE_ELECTRO_EFFECT = mod:get("remove_electro_effect") == true
+	if not setting_id or setting_id == "electro_intensity" then
+		ELECTRO_INTENSITY = intensity_of("electro_intensity")
 	end
 	if not setting_id or setting_id == "remove_shield_effect" then
 		REMOVE_SHIELD_EFFECT = mod:get("remove_shield_effect") == true
@@ -45,14 +64,15 @@ local function refresh_settings(setting_id)
 	if not setting_id or setting_id == "display_shield_radius" then
 		DISPLAY_SHIELD_RADIUS = mod:get("display_shield_radius") == true
 	end
-	if not setting_id or setting_id == "R" then
-		DECAL_R = mod:get("R") or 0
-	end
-	if not setting_id or setting_id == "G" then
-		DECAL_G = mod:get("G") or 0
-	end
-	if not setting_id or setting_id == "B" then
-		DECAL_B = mod:get("B") or 0
+	if not setting_id or setting_id == "shield_radius_color" then
+		local color = mod:get("shield_radius_color")
+
+		if type(color) == "table" then
+			-- DMF stores and returns colors as an array-like { A, R, G, B }.
+			DECAL_R = color[2] or 0
+			DECAL_G = color[3] or 0
+			DECAL_B = color[4] or 4
+		end
 	end
 end
 
@@ -219,12 +239,16 @@ end)
 
 -- Whether a chain lightning source is the electrokinetic staff or Smite is a
 -- property of the source, so it is resolved once per func_context and cached
--- (weakly, so nothing keeps a spent context alive).
+-- (weakly, so nothing keeps a spent context alive). The two have separate settings.
 local chain_source_is_staff = setmetatable({}, { __mode = "k" })
 
-local function chain_suppressed(func_context)
-	if not REMOVE_SMITE_EFFECT then
-		return false
+-- Links spawned so far per source, so a partial intensity keeps every other link
+-- rather than flipping a coin per link, which would pop in and out frame to frame.
+local chain_link_counts = setmetatable({}, { __mode = "k" })
+
+local function chain_intensity(func_context)
+	if SMITE_INTENSITY >= 100 and ELECTRO_INTENSITY >= 100 then
+		return 100
 	end
 
 	local is_staff = chain_source_is_staff[func_context]
@@ -238,11 +262,7 @@ local function chain_suppressed(func_context)
 		chain_source_is_staff[func_context] = is_staff
 	end
 
-	if is_staff and not REMOVE_ELECTRO_EFFECT then
-		return false
-	end
-
-	return true
+	return is_staff and ELECTRO_INTENSITY or SMITE_INTENSITY
 end
 
 -- Vanilla's add callbacks mark hit_units so the chain does not try to re-add the
@@ -252,86 +272,209 @@ local function suppress_spawn(node, context)
 end
 
 -- Every link, including the ones created by ChainLightning.jump, is added through
--- ChainLightningTarget.add_child, so substituting the callback here removes the beams
--- while leaving the node tree, vanilla's own cleanup and its hit_units tracking alone.
+-- ChainLightningTarget.add_child, so substituting the callback here thins or removes
+-- the beams while leaving the node tree, vanilla's own cleanup and its hit_units
+-- tracking alone.
 mod:hook(ChainLightningTarget, "add_child", function(func, self, on_add_func, func_context, ...)
-	if chain_suppressed(func_context) then
-		return func(self, suppress_spawn, func_context, ...)
+	local intensity = chain_intensity(func_context)
+
+	if intensity >= 100 then
+		return func(self, on_add_func, func_context, ...)
 	end
 
-	return func(self, on_add_func, func_context, ...)
+	if intensity > 0 then
+		local count = (chain_link_counts[func_context] or 0) + 1
+
+		chain_link_counts[func_context] = count
+
+		local keep_every = math.max(1, math.floor(100 / intensity + 0.5))
+
+		if count % keep_every == 0 then
+			return func(self, on_add_func, func_context, ...)
+		end
+	end
+
+	return func(self, suppress_spawn, func_context, ...)
 end)
 
--- The arc drawn when the chain has no target is spawned outside add_child.
+-- The arc drawn when the chain has no target is spawned outside add_child. It is a
+-- single small effect, so it only goes away with the chain itself.
 mod:hook(CLASS.ChainLightningLinkEffects, "_find_no_target", function(func, self, t)
-	if chain_suppressed(self._func_context) then
+	if chain_intensity(self._func_context) <= 0 then
 		return
 	end
 
 	return func(self, t)
 end)
 
-local function damage_type_suppressed(damage_type)
+local function damage_type_intensity(damage_type)
 	if damage_type == "warpfire" then
-		return REMOVE_PURGATUS_EFFECT
+		return PURGATUS_INTENSITY
 	elseif damage_type == "burning" then
-		return REMOVE_FLAMER_EFFECT
+		return FLAMER_INTENSITY
 	end
 
-	return false
+	return 100
 end
 
 -- Mirrors vanilla's handling of both fire configuration shapes (the game reads
 -- "fire_configurations or fire_configuration"), so a weapon using either form is
--- treated correctly. A plural weapon is only suppressed when every configuration is
--- one the user asked to remove.
-local function fire_configuration_suppressed(action_settings)
+-- treated correctly. A weapon with several configurations takes the most restrictive
+-- of them, because the effects are created per action rather than per configuration.
+local function fire_configuration_intensity(action_settings)
 	if not action_settings then
-		return false
+		return 100
 	end
 
 	local configuration = action_settings.fire_configuration
 
 	if configuration then
-		return damage_type_suppressed(configuration.damage_type)
+		return damage_type_intensity(configuration.damage_type)
 	end
 
 	local configurations = action_settings.fire_configurations
 
 	if not configurations then
-		return false
+		return 100
 	end
 
 	local num_configurations = #configurations
 
 	if num_configurations == 0 then
-		return false
+		return 100
 	end
 
+	local intensity = 100
+
 	for i = 1, num_configurations do
-		if not damage_type_suppressed(configurations[i].damage_type) then
-			return false
+		local candidate = damage_type_intensity(configurations[i].damage_type)
+
+		if candidate < intensity then
+			intensity = candidate
 		end
 	end
 
-	return true
+	return intensity
 end
 
--- Wrapping rather than replacing _update_effects: when nothing is suppressed vanilla
--- runs untouched (no copied body to drift out of date and no extra work), and when it
--- is suppressed the pose lookup, the particle variable lookups and every Vector3 and
--- Quaternion vanilla builds to place, move and drive the effects are skipped.
+-- Vanilla's scorch decals are queued round robin through self._impact_data, so the
+-- slot that moved since the last frame is the one it just queued. Counting queued
+-- impacts and clearing a share of them thins the decals out by an exact ratio rather
+-- than by chance, and only runs while the effect is being scaled down.
+local function thin_impact_decals(self, intensity)
+	local impact_index = self._impact_index
+
+	if impact_index == self._iws_last_impact_index then
+		return
+	end
+
+	self._iws_last_impact_index = impact_index
+
+	local queued = (self._iws_impact_count or 0) + 1
+
+	self._iws_impact_count = queued
+
+	local keep_every = math.max(1, math.floor(100 / intensity + 0.5))
+
+	if queued % keep_every == 0 then
+		return
+	end
+
+	local impact_data = self._impact_data
+	local index = impact_index - 1
+
+	if index < 1 then
+		index = #impact_data
+	end
+
+	local data = impact_data[index]
+
+	data.time = nil
+	data.effect_name = nil
+end
+
+-- Shortens how long the flame particles live, which is what the stream's cost is
+-- made of: the same particles are spawned, but fewer of them are alive at once. The
+-- distance and speed the game derives that life from are mirrored here, and the
+-- particle variable index is cached per effect name (vanilla looks it up every frame).
+local stream_life_variables = {}
+
+local function scale_stream_life(self, action_settings, intensity)
+	local stream_effect_id = self._stream_effect_id
+
+	if not stream_effect_id then
+		return
+	end
+
+	local effects = action_settings and action_settings.fx
+	local stream_effect_data = effects and effects.stream_effect
+	local speed = stream_effect_data and stream_effect_data.speed
+	local position_finder = self._action_module_position_finder_component
+
+	if not speed or speed == 0 or not position_finder then
+		return
+	end
+
+	local distance
+
+	if position_finder.position_valid then
+		local pose = self._fx_extension:vfx_spawner_pose(self._fx_source_name)
+
+		distance = Vector3.length(position_finder.position - Matrix4x4.translation(pose))
+	else
+		distance = self._action_flamer_gas_component.range
+	end
+
+	local effect_name = self._fx_extension:should_play_husk_effect() and stream_effect_data.name_3p or stream_effect_data.name
+
+	if not effect_name then
+		return
+	end
+
+	local variable_index = stream_life_variables[effect_name]
+
+	if variable_index == nil then
+		variable_index = World.find_particles_variable(self._world, effect_name, "life")
+		stream_life_variables[effect_name] = variable_index
+	end
+
+	if not variable_index then
+		return
+	end
+
+	local life = distance / speed * intensity / 100
+
+	World.set_particles_variable(self._world, stream_effect_id, variable_index, Vector3(life, life, life))
+end
+
+-- Wrapping rather than replacing _update_effects: when nothing is configured vanilla
+-- runs untouched (no copied body to drift out of date and no extra work). When it is,
+-- the pose lookup, the particle variable lookup and the Vector3s and Quaternions
+-- vanilla builds to place, move and drive the effects are skipped once the effect is
+-- removed, and are only paid for when a scaled down effect still needs them.
 mod:hook(CLASS.FlamerGasEffects, "_update_effects", function(func, self, dt, t)
-	if not (REMOVE_FLAMER_EFFECT or REMOVE_PURGATUS_EFFECT) then
+	if FLAMER_INTENSITY >= 100 and PURGATUS_INTENSITY >= 100 then
 		return func(self, dt, t)
 	end
 
 	local action_settings = Action.current_action_settings_from_component(self._weapon_action_component, self._weapon_actions)
+	local intensity = fire_configuration_intensity(action_settings)
 
-	if not fire_configuration_suppressed(action_settings) then
+	if intensity >= 100 then
 		self._iws_impacts_cleared = false
 
 		return func(self, dt, t)
+	end
+
+	if intensity > 0 then
+		self._iws_impacts_cleared = false
+
+		func(self, dt, t)
+
+		scale_stream_life(self, action_settings, intensity)
+		thin_impact_decals(self, intensity)
+
+		return
 	end
 
 	-- Drop anything queued before the suppression so no decal fires afterwards.
@@ -363,9 +506,10 @@ mod:hook(CLASS.FlamerGasEffects, "_update_effects", function(func, self, dt, t)
 end)
 
 -- Wrapped so the looping pilot light is never resolved, created and linked in the
--- first place rather than being created and then destroyed again.
+-- first place rather than being created and then destroyed again. It is a single
+-- small effect, so it only goes away with the flame itself.
 mod:hook(CLASS.FlamerPilotLightEffects, "_create_effects", function(func, self)
-	if REMOVE_FLAMER_EFFECT then
+	if FLAMER_INTENSITY <= 0 then
 		return
 	end
 
